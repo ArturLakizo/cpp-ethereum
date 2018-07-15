@@ -30,13 +30,6 @@
 namespace dev
 {
 
-struct TrieDBChannel: public LogChannel
-{
-    static const char* name() { return "-T-"; }
-    static const int verbosity = 17;
-};
-#define tdebug clog(TrieDBChannel)
-
 struct InvalidTrie: virtual dev::Exception {};
 
 enum class Verification {
@@ -487,6 +480,7 @@ public:
 
         HashedIterator() {}
         HashedIterator(FatGenericTrieDB const* _trie) : Super(_trie) {}
+        HashedIterator(FatGenericTrieDB const* _trie, bytesConstRef _hashedKey): Super(_trie, _hashedKey) {}
 
         bytes key() const
         {
@@ -497,6 +491,7 @@ public:
 
     HashedIterator hashedBegin() const { return HashedIterator(this); }
     HashedIterator hashedEnd() const { return HashedIterator(); }
+    HashedIterator hashedLowerBound(h256 const& _hashedKey) const { return HashedIterator(this, _hashedKey.ref()); }
 };
 
 template <class KeyType, class DB> using TrieDB = SpecificTrieDB<GenericTrieDB<DB>, KeyType>;

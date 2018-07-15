@@ -38,26 +38,6 @@ using namespace dev;
 using namespace dev::eth;
 namespace fs = boost::filesystem;
 
-const char* StateSafeExceptions::name() { return EthViolet "⚙" EthBlue " ℹ"; }
-const char* StateDetail::name() { return EthViolet "⚙" EthWhite " ◌"; }
-const char* StateTrace::name() { return EthViolet "⚙" EthGray " ◎"; }
-const char* StateChat::name() { return EthViolet "⚙" EthWhite " ◌"; }
-
-namespace
-{
-
-/// @returns true when normally halted; false when exceptionally halted.
-bool executeTransaction(Executive& _e, Transaction const& _t, OnOpFunc const& _onOp)
-{
-    _e.initialize(_t);
-
-    if (!_e.execute())
-        _e.go(_onOp);
-    return _e.finalize();
-}
-
-}
-
 State::State(u256 const& _accountStartNonce, OverlayDB const& _db, BaseState _bs):
     m_db(_db),
     m_state(&m_db),
@@ -84,7 +64,7 @@ OverlayDB State::openDB(fs::path const& _basePath, h256 const& _genesisHash, Wit
 
     if (_we == WithExisting::Kill)
     {
-        clog(StateDetail) << "Killing state database (WithExisting::Kill).";
+        clog(VerbosityDebug, "statedb") << "Killing state database (WithExisting::Kill).";
         fs::remove_all(path / fs::path("state"));
     }
 
@@ -95,7 +75,7 @@ OverlayDB State::openDB(fs::path const& _basePath, h256 const& _genesisHash, Wit
     try
     {
         std::unique_ptr<db::DatabaseFace> db(new db::DBImpl(path / fs::path("state")));
-        clog(StateDetail) << "Opened state DB.";
+        clog(VerbosityTrace, "statedb") << "Opened state DB.";
         return OverlayDB(std::move(db));
     }
     catch (boost::exception const& ex)
@@ -237,6 +217,59 @@ unordered_map<Address, u256> State::addresses() const
 #else
     BOOST_THROW_EXCEPTION(InterfaceNotSupported("State::addresses()"));
 #endif
+}
+
+std::pair<State::AddressMap, h256> State::addresses(
+    h256 const& _beginHash, size_t _maxResults) const
+{
+    AddressMap addresses;
+    h256 nextKey;
+
+    for (auto it = m_state.hashedLowerBound(_beginHash); it != m_state.hashedEnd(); ++it)
+    {
+        auto const address = Address(it.key());
+        auto const itCachedAddress = m_cache.find(address);
+
+        // skip if deleted in cache
+        if (itCachedAddress != m_cache.end() && itCachedAddress->second.isDirty() &&
+            !itCachedAddress->second.isAlive())
+            continue;
+
+        // break when _maxResults fetched
+        if (addresses.size() == _maxResults)
+        {
+            nextKey = h256((*it).first);
+            break;
+        }
+
+        h256 const hashedAddress((*it).first);
+        addresses[hashedAddress] = address;
+    }
+
+    // get addresses from cache with hash >= _beginHash (both new and old touched, we can't
+    // distinguish them) and order by hash
+    AddressMap cacheAddresses;
+    for (auto const& addressAndAccount : m_cache)
+    {
+        auto const& address = addressAndAccount.first;
+        auto const addressHash = sha3(address);
+        auto const& account = addressAndAccount.second;
+        if (account.isDirty() && account.isAlive() && addressHash >= _beginHash)
+            cacheAddresses.emplace(addressHash, address);
+    }
+
+    // merge addresses from DB and addresses from cache
+    addresses.insert(cacheAddresses.begin(), cacheAddresses.end());
+
+    // if some new accounts were created in cache we need to return fewer results
+    if (addresses.size() > _maxResults)
+    {
+        auto itEnd = std::next(addresses.begin(), _maxResults);
+        nextKey = itEnd->first;
+        addresses.erase(itEnd, addresses.end());
+    }
+
+    return {addresses, nextKey};
 }
 
 void State::setRoot(h256 const& _r)
@@ -555,18 +588,17 @@ void State::rollback(size_t _savepoint)
 
 std::pair<ExecutionResult, TransactionReceipt> State::execute(EnvInfo const& _envInfo, SealEngineFace const& _sealEngine, Transaction const& _t, Permanence _p, OnOpFunc const& _onOp)
 {
-    auto onOp = _onOp;
-#if ETH_VMTRACE
-    if (isChannelVisible<VMTraceChannel>())
-        onOp = Executive::simpleTrace(); // override tracer
-#endif
-
     // Create and initialize the executive. This will throw fairly cheaply and quickly if the
     // transaction is bad in any way.
     Executive e(*this, _envInfo, _sealEngine);
     ExecutionResult res;
     e.setResultRecipient(res);
 
+    auto onOp = _onOp;
+#if ETH_VMTRACE
+    if (!onOp)
+        onOp = e.simpleTrace();
+#endif
     u256 const startGasUsed = _envInfo.gasUsed();
     bool const statusCode = executeTransaction(e, _t, onOp);
 
@@ -601,6 +633,26 @@ void State::executeBlockTransactions(Block const& _block, unsigned _txCount, Las
         executeTransaction(e, _block.pending()[i], OnOpFunc());
 
         gasUsed += e.gasUsed();
+    }
+}
+
+/// @returns true when normally halted; false when exceptionally halted; throws when internal VM
+/// exception occurred.
+bool State::executeTransaction(Executive& _e, Transaction const& _t, OnOpFunc const& _onOp)
+{
+    size_t const savept = savepoint();
+    try
+    {
+        _e.initialize(_t);
+
+        if (!_e.execute())
+            _e.go(_onOp);
+        return _e.finalize();
+    }
+    catch (Exception const&)
+    {
+        rollback(savept);
+        throw;
     }
 }
 

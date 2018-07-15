@@ -38,9 +38,10 @@ class FixedClient: public dev::eth::ClientBase
 {
 public:
     FixedClient(eth::BlockChain const& _bc, eth::Block const& _block) :  m_bc(_bc), m_block(_block) {}
-
+    
     // stub
     void flushTransactions() override {}
+    eth::Transactions pending() const override { eth::Transactions res; return res; }
     eth::BlockChain& bc() override
     {
         BOOST_THROW_EXCEPTION(InterfaceNotSupported() << errinfo_interface("FixedClient::bc()"));
@@ -55,6 +56,7 @@ public:
     std::pair<h256, Address> submitTransaction(eth::TransactionSkeleton const&, Secret const&) override { return {}; };
     eth::ImportResult injectTransaction(bytes const&, eth::IfDropped) override { return {}; }
     eth::ExecutionResult call(Address const&, u256, Address, bytes const&, u256, u256, eth::BlockNumber, eth::FudgeFactor) override { return {}; };
+    eth::TransactionSkeleton populateTransactionWithDefaults(eth::TransactionSkeleton const&) const override { return {}; };
 
 private:
     eth::BlockChain const& m_bc;

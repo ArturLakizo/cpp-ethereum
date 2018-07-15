@@ -130,6 +130,9 @@ Json::Value toJson(dev::eth::Transaction const& _t, std::pair<h256, unsigned> _l
         res["blockHash"] = toJS(_location.first);
         res["transactionIndex"] = toJS(_location.second);
         res["blockNumber"] = toJS(_blockNumber);
+        res["v"] = toJS(_t.signature().v);
+        res["r"] = toJS(_t.signature().r);
+        res["s"] = toJS(_t.signature().s);
     }
     return res;
 }
@@ -187,7 +190,7 @@ Json::Value toJson(dev::eth::TransactionReceipt const& _t)
         res["status"] = toString(_t.statusCode());
     else
         res["stateRoot"] = toJS(_t.stateRoot());
-    res["gasUsed"] = toJS(_t.gasUsed());
+    res["gasUsed"] = toJS(_t.cumulativeGasUsed());
     res["bloom"] = toJS(_t.bloom());
     res["log"] = dev::toJson(_t.log());
     return res;
@@ -200,7 +203,7 @@ Json::Value toJson(dev::eth::LocalisedTransactionReceipt const& _t)
     res["transactionIndex"] = _t.transactionIndex();
     res["blockHash"] = toJS(_t.blockHash());
     res["blockNumber"] = _t.blockNumber();
-    res["cumulativeGasUsed"] = toJS(_t.gasUsed());
+    res["cumulativeGasUsed"] = toJS(_t.cumulativeGasUsed());
     res["gasUsed"] = toJS(_t.gasUsed());
     res["contractAddress"] = toJS(_t.contractAddress());
     res["logs"] = dev::toJson(_t.localisedLogs());
@@ -227,6 +230,14 @@ Json::Value toJson(dev::eth::Transaction const& _t)
     res["r"] = toJS(_t.signature().r);
     res["s"] = toJS(_t.signature().s);
     res["v"] = toJS(_t.signature().v);
+    return res;
+}
+
+Json::Value toJson(dev::eth::Transaction const& _t, bytes const& _rlp)
+{
+    Json::Value res;
+    res["raw"] = toJS(_rlp);
+    res["tx"] = toJson(_t);
     return res;
 }
 
